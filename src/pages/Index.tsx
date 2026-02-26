@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
-import { Video, VideoOff, Mic, MicOff, Zap } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Video, VideoOff, Zap } from "lucide-react";
 
 const Index = () => {
   const [cameraOn, setCameraOn] = useState(false);
@@ -74,13 +75,13 @@ const Index = () => {
           </button>
         </div>
 
-        <a
-          href="/chat"
+        <Link
+          to="/chat"
           className="inline-flex items-center gap-2 bg-primary text-primary-foreground font-display font-bold text-lg px-8 py-4 rounded-lg hover:opacity-90 transition-all animate-pulse-glow"
         >
           <Video className="w-5 h-5" />
           Start Chatting
-        </a>
+        </Link>
 
         <p className="text-muted-foreground text-xs font-body">
           By using meetrr, you accept our community guidelines.
