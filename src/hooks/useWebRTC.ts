@@ -18,11 +18,12 @@ const ICE_SERVERS = [
 const WAITING_USER_TTL_MS = 60_000;
 
 type ConnectionStatus = "idle" | "searching" | "connecting" | "connected" | "disconnected";
-type SignalType = "offer" | "answer" | "ice-candidate";
+type SignalType = "offer" | "answer" | "ice-candidate" | "invite";
 
 interface SignalPayload {
   sdp?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
+  partner_id?: string;
 }
 
 interface DbSignal {
@@ -363,8 +364,46 @@ export function useWebRTC() {
     }
     console.log("[meetrr] inserted into waiting_users");
 
+    const checkInvite = async () => {
+      if (roomRef.current || cleanedUpRef.current) return false;
+
+      const { data: invites, error: inviteError } = await supabase
+        .from("signals")
+        .select("id, sender_id")
+        .eq("room_id", `invite-${myId}`)
+        .neq("sender_id", myId)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (inviteError) {
+        console.warn("[meetrr] invite poll error:", inviteError);
+        return false;
+      }
+
+      if (!invites || invites.length === 0) {
+        return false;
+      }
+
+      const invite = invites[0] as { id: string; sender_id: string };
+      const partnerId = invite.sender_id;
+
+      // Best-effort cleanup of consumed invite.
+      await supabase.from("signals").delete().eq("id", invite.id);
+
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+
+      const iAmOfferer = myId > partnerId;
+      await connectToPeer(stream, partnerId, iAmOfferer);
+      searchInProgressRef.current = false;
+      return true;
+    };
+
     const tryMatch = async () => {
       if (cleanedUpRef.current) return;
+      if (await checkInvite()) return;
 
       const { data, error } = await supabase
         .from("waiting_users")
@@ -394,7 +433,7 @@ export function useWebRTC() {
         }
 
         // Nudge partner to connect immediately (faster than waiting for next poll).
-        await sendSignal(`invite-${partnerId}`, "offer", { sdp: { type: "offer", sdp: myId } });
+        await sendSignal(`invite-${partnerId}`, "invite", { partner_id: myId });
 
         const iAmOfferer = myId > partnerId;
         await connectToPeer(stream, partnerId, iAmOfferer);
@@ -433,6 +472,7 @@ export function useWebRTC() {
 
     realtimeChannelRef.current = inviteChannel;
 
+    await checkInvite();
     await tryMatch();
     if (!roomRef.current && !cleanedUpRef.current) {
       pollingRef.current = setInterval(tryMatch, 1000);
