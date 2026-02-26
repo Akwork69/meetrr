@@ -66,6 +66,7 @@ export function useWebRTC() {
   const myIdRef = useRef<string>(generateClientId());
   const roomRef = useRef<string | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
+  const videoSenderRef = useRef<RTCRtpSender | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cleanedUpRef = useRef(false);
   const searchInProgressRef = useRef(false);
@@ -81,6 +82,7 @@ export function useWebRTC() {
       pcRef.current = null;
     }
     dataChannelRef.current = null;
+    videoSenderRef.current = null;
 
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
@@ -168,7 +170,16 @@ export function useWebRTC() {
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       pcRef.current = pc;
 
-      stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+      // Reserve a negotiated video sender even when camera is unavailable initially.
+      const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
+      videoSenderRef.current = videoTransceiver.sender;
+
+      const initialVideoTrack = stream.getVideoTracks()[0];
+      if (initialVideoTrack) {
+        void videoSenderRef.current.replaceTrack(initialVideoTrack);
+      }
+
+      stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
 
       pc.ontrack = (e) => {
         console.log("[meetrr] remote track received");
@@ -479,6 +490,46 @@ export function useWebRTC() {
     }
   }, [cleanup, getLocalStream, connectToPeer, sendSignal]);
 
+  const setCameraEnabled = useCallback(
+    async (enabled: boolean) => {
+      const stream = localStreamRef.current ?? (await getLocalStream());
+      const existingVideoTrack = stream.getVideoTracks()[0];
+
+      if (!enabled) {
+        if (existingVideoTrack) existingVideoTrack.enabled = false;
+        return;
+      }
+
+      if (existingVideoTrack) {
+        existingVideoTrack.enabled = true;
+        return;
+      }
+
+      const mediaDevices = navigator?.mediaDevices;
+      if (!mediaDevices || typeof mediaDevices.getUserMedia !== "function") {
+        console.warn("[meetrr] cannot enable camera: getUserMedia unavailable");
+        return;
+      }
+
+      try {
+        const cameraStream = await mediaDevices.getUserMedia({ video: true, audio: false });
+        const newVideoTrack = cameraStream.getVideoTracks()[0];
+        if (!newVideoTrack) return;
+
+        stream.addTrack(newVideoTrack);
+        localStreamRef.current = stream;
+        setLocalStream(new MediaStream(stream.getTracks()));
+
+        if (videoSenderRef.current) {
+          await videoSenderRef.current.replaceTrack(newVideoTrack);
+        }
+      } catch (err) {
+        console.warn("[meetrr] enabling camera failed:", err);
+      }
+    },
+    [getLocalStream]
+  );
+
   // --- Send chat message ---
   const sendMessage = useCallback((text: string) => {
     if (dataChannelRef.current?.readyState === "open") {
@@ -519,5 +570,6 @@ export function useWebRTC() {
     disconnect,
     skip,
     getLocalStream,
+    setCameraEnabled,
   };
 }

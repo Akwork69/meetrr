@@ -17,9 +17,10 @@ const ChatRoom = () => {
     disconnect,
     skip,
     getLocalStream,
+    setCameraEnabled,
   } = useWebRTC();
 
-  const [cameraOn, setCameraOn] = useState(true);
+  const [cameraOn, setCameraOn] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const startedRef = useRef(false);
 
@@ -29,11 +30,15 @@ const ChatRoom = () => {
     getLocalStream().then(() => startSearching());
   }, [getLocalStream, startSearching]);
 
-  const toggleCamera = () => {
-    if (localStream) {
-      localStream.getVideoTracks().forEach((t) => (t.enabled = !t.enabled));
-      setCameraOn((v) => !v);
-    }
+  useEffect(() => {
+    const hasEnabledVideo = Boolean(localStream?.getVideoTracks().some((t) => t.enabled));
+    setCameraOn(hasEnabledVideo);
+  }, [localStream]);
+
+  const toggleCamera = async () => {
+    const next = !cameraOn;
+    await setCameraEnabled(next);
+    setCameraOn(next);
   };
 
   const toggleMic = () => {
