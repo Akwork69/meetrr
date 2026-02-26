@@ -16,6 +16,12 @@ const ICE_SERVERS = [
   },
 ];
 const WAITING_USER_TTL_MS = 60_000;
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  channelCount: 1,
+};
 
 type ConnectionStatus = "idle" | "searching" | "connecting" | "connected" | "disconnected";
 type SignalType = "offer" | "answer" | "ice-candidate" | "invite";
@@ -73,6 +79,16 @@ export function useWebRTC() {
   const searchInProgressRef = useRef(false);
   const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
+  const enforceAudioConstraints = useCallback(async (stream: MediaStream) => {
+    const audioTrack = stream.getAudioTracks()[0];
+    if (!audioTrack || typeof audioTrack.applyConstraints !== "function") return;
+    try {
+      await audioTrack.applyConstraints(AUDIO_CONSTRAINTS);
+    } catch (err) {
+      console.warn("[meetrr] audio constraints not fully supported:", err);
+    }
+  }, []);
+
   // --- Cleanup ---
   const cleanup = useCallback(async () => {
     console.log("[meetrr] cleanup");
@@ -123,14 +139,16 @@ export function useWebRTC() {
     }
 
     try {
-      const stream = await mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await mediaDevices.getUserMedia({ video: true, audio: AUDIO_CONSTRAINTS });
+      await enforceAudioConstraints(stream);
       localStreamRef.current = stream;
       setLocalStream(stream);
       return stream;
     } catch (err) {
       console.warn("[meetrr] getUserMedia failed, trying audio only:", err);
       try {
-        const stream = await mediaDevices.getUserMedia({ video: false, audio: true });
+        const stream = await mediaDevices.getUserMedia({ video: false, audio: AUDIO_CONSTRAINTS });
+        await enforceAudioConstraints(stream);
         localStreamRef.current = stream;
         setLocalStream(stream);
         return stream;
@@ -142,7 +160,7 @@ export function useWebRTC() {
         return stream;
       }
     }
-  }, []);
+  }, [enforceAudioConstraints]);
 
   // --- Data Channel ---
   const setupDataChannel = useCallback((dc: RTCDataChannel) => {
