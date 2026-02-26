@@ -11,8 +11,27 @@ const VideoPanel = ({ stream, label, muted = false }: VideoPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && stream) {
-      videoRef.current.srcObject = stream;
+    if (!videoRef.current || !stream) return;
+
+    const video = videoRef.current;
+    video.srcObject = stream;
+
+    const tryPlay = async () => {
+      try {
+        await video.play();
+      } catch {
+        // Mobile browsers may block autoplay with audio.
+        video.muted = true;
+        await video.play().catch(() => undefined);
+      }
+    };
+
+    void tryPlay();
+
+    return () => {
+      if (video.srcObject === stream) {
+        video.srcObject = null;
+      }
     }
   }, [stream]);
 
