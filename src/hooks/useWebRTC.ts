@@ -207,12 +207,35 @@ export function useWebRTC() {
   // --- Connect to peer using DB-based signaling ---
   const connectToPeer = useCallback(
     async (stream: MediaStream, partnerId: string, iAmOfferer: boolean) => {
+      if (roomRef.current) return;
+      if (realtimeChannelRef.current) {
+        supabase.removeChannel(realtimeChannelRef.current);
+        realtimeChannelRef.current = null;
+      }
+
       const roomId = [myIdRef.current, partnerId].sort().join("-");
       roomRef.current = roomId;
       setStatus("connecting");
       console.log("[meetrr] room:", roomId, "offerer:", iAmOfferer);
 
       const pc = createPeerConnection(stream, roomId, iAmOfferer);
+      const pendingIce: RTCIceCandidateInit[] = [];
+
+      const addOrQueueIce = async (candidate?: RTCIceCandidateInit) => {
+        if (!candidate) return;
+        if (pc.remoteDescription) {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          return;
+        }
+        pendingIce.push(candidate);
+      };
+
+      const flushPendingIce = async () => {
+        if (!pc.remoteDescription || pendingIce.length === 0) return;
+        for (const candidate of pendingIce.splice(0)) {
+          await pc.addIceCandidate(new RTCIceCandidate(candidate));
+        }
+      };
 
       // Listen for signals via Postgres realtime
       const channel = supabase
@@ -234,15 +257,15 @@ export function useWebRTC() {
             try {
               if (signal.type === "offer" && !iAmOfferer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
+                await flushPendingIce();
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 await sendSignal(roomId, "answer", { sdp: answer });
               } else if (signal.type === "answer" && iAmOfferer) {
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
+                await flushPendingIce();
               } else if (signal.type === "ice-candidate") {
-                if (pc.remoteDescription) {
-                  await pc.addIceCandidate(new RTCIceCandidate(signal.payload.candidate));
-                }
+                await addOrQueueIce(signal.payload.candidate);
               }
             } catch (e) {
               console.error("[meetrr] signal handling error:", e);
@@ -276,14 +299,16 @@ export function useWebRTC() {
               if (signal.type === "offer" && !iAmOfferer && !pc.remoteDescription) {
                 console.log("[meetrr] processing offer from DB poll");
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
+                await flushPendingIce();
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
                 await sendSignal(roomId, "answer", { sdp: answer });
               } else if (signal.type === "answer" && iAmOfferer && !pc.remoteDescription) {
                 console.log("[meetrr] processing answer from DB poll");
                 await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
-              } else if (signal.type === "ice-candidate" && pc.remoteDescription) {
-                await pc.addIceCandidate(new RTCIceCandidate(signal.payload.candidate));
+                await flushPendingIce();
+              } else if (signal.type === "ice-candidate") {
+                await addOrQueueIce(signal.payload.candidate);
               }
             } catch (e) {
               console.warn("[meetrr] signal poll error:", e);
@@ -292,18 +317,19 @@ export function useWebRTC() {
         }
       }, 2000);
 
-      // Offerer: send offer after delay
+      // Remove self from waiting queue once we move to a room.
+      await supabase.from("waiting_users").delete().eq("user_id", myIdRef.current);
+
+      // Offerer: send offer quickly.
       if (iAmOfferer) {
-        setTimeout(async () => {
-          console.log("[meetrr] creating offer...");
-          try {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            await sendSignal(roomId, "offer", { sdp: offer });
-          } catch (e) {
-            console.error("[meetrr] offer error:", e);
-          }
-        }, 3000);
+        console.log("[meetrr] creating offer...");
+        try {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await sendSignal(roomId, "offer", { sdp: offer });
+        } catch (e) {
+          console.error("[meetrr] offer error:", e);
+        }
       }
     },
     [createPeerConnection, sendSignal]
@@ -367,25 +393,8 @@ export function useWebRTC() {
           pollingRef.current = null;
         }
 
-        // Claim partner atomically by deleting their waiting row.
-        const { data: claimedPartner, error: claimError } = await supabase
-          .from("waiting_users")
-          .delete()
-          .eq("user_id", partnerId)
-          .select("user_id");
-
-        if (claimError) {
-          console.warn("[meetrr] partner claim error:", claimError);
-          return;
-        }
-
-        if (!claimedPartner || claimedPartner.length === 0) {
-          // Another client matched this partner first.
-          return;
-        }
-
-        // Remove self from waiting queue before connecting.
-        await supabase.from("waiting_users").delete().eq("user_id", myId);
+        // Nudge partner to connect immediately (faster than waiting for next poll).
+        await sendSignal(`invite-${partnerId}`, "offer", { sdp: { type: "offer", sdp: myId } });
 
         const iAmOfferer = myId > partnerId;
         await connectToPeer(stream, partnerId, iAmOfferer);
@@ -393,11 +402,42 @@ export function useWebRTC() {
       }
     };
 
+    // Listen for direct invites while searching.
+    const inviteChannel = supabase
+      .channel(`invite-${myId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "signals",
+          filter: `room_id=eq.invite-${myId}`,
+        },
+        async (payload) => {
+          if (roomRef.current || cleanedUpRef.current) return;
+          const invite = payload.new as DbSignal;
+          if (invite.sender_id === myId) return;
+
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+
+          const partnerId = invite.sender_id;
+          const iAmOfferer = myId > partnerId;
+          await connectToPeer(stream, partnerId, iAmOfferer);
+          searchInProgressRef.current = false;
+        }
+      )
+      .subscribe();
+
+    realtimeChannelRef.current = inviteChannel;
+
     await tryMatch();
     if (!roomRef.current && !cleanedUpRef.current) {
-      pollingRef.current = setInterval(tryMatch, 2000);
+      pollingRef.current = setInterval(tryMatch, 1000);
     }
-  }, [cleanup, getLocalStream, connectToPeer]);
+  }, [cleanup, getLocalStream, connectToPeer, sendSignal]);
 
   // --- Send chat message ---
   const sendMessage = useCallback((text: string) => {
