@@ -30,6 +30,25 @@ interface DbSignal {
   payload: SignalPayload;
 }
 
+const generateClientId = (): string => {
+  const webCrypto = globalThis.crypto;
+
+  if (webCrypto && typeof webCrypto.randomUUID === "function") {
+    return webCrypto.randomUUID();
+  }
+
+  if (webCrypto && typeof webCrypto.getRandomValues === "function") {
+    const bytes = new Uint8Array(16);
+    webCrypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return `client-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+};
+
 export function useWebRTC() {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -37,11 +56,13 @@ export function useWebRTC() {
   const [messages, setMessages] = useState<{ text: string; from: "me" | "stranger" }[]>([]);
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const myIdRef = useRef<string>(crypto.randomUUID());
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const myIdRef = useRef<string>(generateClientId());
   const roomRef = useRef<string | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cleanedUpRef = useRef(false);
+  const searchInProgressRef = useRef(false);
   const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   // --- Cleanup ---
@@ -80,25 +101,38 @@ export function useWebRTC() {
 
   // --- Media ---
   const getLocalStream = useCallback(async () => {
-    if (localStream) return localStream;
+    if (localStreamRef.current) return localStreamRef.current;
+
+    const mediaDevices = navigator?.mediaDevices;
+    if (!mediaDevices || typeof mediaDevices.getUserMedia !== "function") {
+      console.warn("[meetrr] mediaDevices.getUserMedia not available; using empty stream");
+      const stream = new MediaStream();
+      localStreamRef.current = stream;
+      setLocalStream(stream);
+      return stream;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const stream = await mediaDevices.getUserMedia({ video: true, audio: true });
+      localStreamRef.current = stream;
       setLocalStream(stream);
       return stream;
     } catch (err) {
       console.warn("[meetrr] getUserMedia failed, trying audio only:", err);
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+        const stream = await mediaDevices.getUserMedia({ video: false, audio: true });
+        localStreamRef.current = stream;
         setLocalStream(stream);
         return stream;
       } catch (err2) {
         console.warn("[meetrr] audio-only also failed, creating empty stream:", err2);
         const stream = new MediaStream();
+        localStreamRef.current = stream;
         setLocalStream(stream);
         return stream;
       }
     }
-  }, [localStream]);
+  }, []);
 
   // --- Data Channel ---
   const setupDataChannel = useCallback((dc: RTCDataChannel) => {
@@ -272,9 +306,14 @@ export function useWebRTC() {
 
   // --- Start searching ---
   const startSearching = useCallback(async () => {
+    if (searchInProgressRef.current) {
+      return;
+    }
+    searchInProgressRef.current = true;
+
     await cleanup();
     cleanedUpRef.current = false;
-    myIdRef.current = crypto.randomUUID();
+    myIdRef.current = generateClientId();
     setStatus("searching");
 
     const stream = await getLocalStream();
@@ -285,6 +324,7 @@ export function useWebRTC() {
     const { error: insertError } = await supabase.from("waiting_users").upsert({ user_id: myId });
     if (insertError) {
       console.error("[meetrr] insert error:", insertError);
+      searchInProgressRef.current = false;
       return;
     }
     console.log("[meetrr] inserted into waiting_users");
@@ -308,6 +348,9 @@ export function useWebRTC() {
 
       if (data && data.length > 0) {
         const partnerId = data[0].user_id;
+        if (partnerId === myId) {
+          return;
+        }
         console.log("[meetrr] matched:", partnerId);
 
         if (pollingRef.current) {
@@ -315,15 +358,16 @@ export function useWebRTC() {
           pollingRef.current = null;
         }
 
-        await supabase.from("waiting_users").delete().in("user_id", [myId, partnerId]);
-
         const iAmOfferer = myId > partnerId;
         await connectToPeer(stream, partnerId, iAmOfferer);
+        searchInProgressRef.current = false;
       }
     };
 
     await tryMatch();
-    pollingRef.current = setInterval(tryMatch, 2000);
+    if (!roomRef.current && !cleanedUpRef.current) {
+      pollingRef.current = setInterval(tryMatch, 2000);
+    }
   }, [cleanup, getLocalStream, connectToPeer]);
 
   // --- Send chat message ---
@@ -336,10 +380,12 @@ export function useWebRTC() {
 
   const disconnect = useCallback(() => {
     cleanup();
+    searchInProgressRef.current = false;
     setStatus("idle");
   }, [cleanup]);
 
   const skip = useCallback(() => {
+    searchInProgressRef.current = false;
     cleanup().then(() => startSearching());
   }, [cleanup, startSearching]);
 
@@ -347,6 +393,7 @@ export function useWebRTC() {
   useEffect(() => {
     return () => {
       cleanedUpRef.current = true;
+      searchInProgressRef.current = false;
       pcRef.current?.close();
       if (pollingRef.current) clearInterval(pollingRef.current);
       if (realtimeChannelRef.current) supabase.removeChannel(realtimeChannelRef.current);
