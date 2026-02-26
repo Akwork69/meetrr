@@ -19,8 +19,6 @@ const WAITING_USER_TTL_MS = 60_000;
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
-  autoGainControl: true,
-  channelCount: 1,
 };
 
 type ConnectionStatus = "idle" | "searching" | "connecting" | "connected" | "disconnected";
@@ -139,7 +137,7 @@ export function useWebRTC() {
     }
 
     try {
-      const stream = await mediaDevices.getUserMedia({ video: true, audio: AUDIO_CONSTRAINTS });
+      const stream = await mediaDevices.getUserMedia({ video: true, audio: true });
       await enforceAudioConstraints(stream);
       localStreamRef.current = stream;
       setLocalStream(stream);
@@ -147,7 +145,7 @@ export function useWebRTC() {
     } catch (err) {
       console.warn("[meetrr] getUserMedia failed, trying audio only:", err);
       try {
-        const stream = await mediaDevices.getUserMedia({ video: false, audio: AUDIO_CONSTRAINTS });
+        const stream = await mediaDevices.getUserMedia({ video: false, audio: true });
         await enforceAudioConstraints(stream);
         localStreamRef.current = stream;
         setLocalStream(stream);
