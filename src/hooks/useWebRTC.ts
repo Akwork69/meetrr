@@ -15,6 +15,7 @@ const ICE_SERVERS = [
     credential: "openrelayproject",
   },
 ];
+const WAITING_USER_TTL_MS = 60_000;
 
 type ConnectionStatus = "idle" | "searching" | "connecting" | "connected" | "disconnected";
 type SignalType = "offer" | "answer" | "ice-candidate";
@@ -47,6 +48,10 @@ const generateClientId = (): string => {
   }
 
   return `client-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+};
+
+const getWaitingUserCutoffIso = (): string => {
+  return new Date(Date.now() - WAITING_USER_TTL_MS).toISOString();
 };
 
 export function useWebRTC() {
@@ -321,6 +326,9 @@ export function useWebRTC() {
 
     console.log("[meetrr] searching as:", myId);
 
+    // Remove abandoned queue entries from crashed/closed tabs.
+    await supabase.from("waiting_users").delete().lt("created_at", getWaitingUserCutoffIso());
+
     const { error: insertError } = await supabase.from("waiting_users").upsert({ user_id: myId });
     if (insertError) {
       console.error("[meetrr] insert error:", insertError);
@@ -336,6 +344,7 @@ export function useWebRTC() {
         .from("waiting_users")
         .select("user_id")
         .neq("user_id", myId)
+        .gte("created_at", getWaitingUserCutoffIso())
         .order("created_at", { ascending: true })
         .limit(1);
 
@@ -357,6 +366,26 @@ export function useWebRTC() {
           clearInterval(pollingRef.current);
           pollingRef.current = null;
         }
+
+        // Claim partner atomically by deleting their waiting row.
+        const { data: claimedPartner, error: claimError } = await supabase
+          .from("waiting_users")
+          .delete()
+          .eq("user_id", partnerId)
+          .select("user_id");
+
+        if (claimError) {
+          console.warn("[meetrr] partner claim error:", claimError);
+          return;
+        }
+
+        if (!claimedPartner || claimedPartner.length === 0) {
+          // Another client matched this partner first.
+          return;
+        }
+
+        // Remove self from waiting queue before connecting.
+        await supabase.from("waiting_users").delete().eq("user_id", myId);
 
         const iAmOfferer = myId > partnerId;
         await connectToPeer(stream, partnerId, iAmOfferer);
