@@ -63,6 +63,7 @@ export function useWebRTC() {
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
   const myIdRef = useRef<string>(generateClientId());
   const roomRef = useRef<string | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -103,6 +104,7 @@ export function useWebRTC() {
     }
 
     roomRef.current = null;
+    remoteStreamRef.current = null;
     setRemoteStream(null);
     setMessages([]);
   }, []);
@@ -183,10 +185,18 @@ export function useWebRTC() {
 
       pc.ontrack = (e) => {
         console.log("[meetrr] remote track received");
-        if (e.streams[0]) {
-          setRemoteStream(e.streams[0]);
-          setStatus("connected");
+        const incomingStream = e.streams[0] ?? remoteStreamRef.current ?? new MediaStream();
+
+        if (!e.streams[0]) {
+          const alreadyPresent = incomingStream.getTracks().some((t) => t.id === e.track.id);
+          if (!alreadyPresent) {
+            incomingStream.addTrack(e.track);
+          }
         }
+
+        remoteStreamRef.current = incomingStream;
+        setRemoteStream(new MediaStream(incomingStream.getTracks()));
+        setStatus("connected");
       };
 
       pc.onicecandidate = (e) => {
@@ -491,24 +501,26 @@ export function useWebRTC() {
   }, [cleanup, getLocalStream, connectToPeer, sendSignal]);
 
   const setCameraEnabled = useCallback(
-    async (enabled: boolean) => {
+    async (enabled: boolean): Promise<boolean> => {
       const stream = localStreamRef.current ?? (await getLocalStream());
       const existingVideoTrack = stream.getVideoTracks()[0];
 
       if (!enabled) {
         if (existingVideoTrack) existingVideoTrack.enabled = false;
-        return;
+        setLocalStream(new MediaStream(stream.getTracks()));
+        return true;
       }
 
       if (existingVideoTrack) {
         existingVideoTrack.enabled = true;
-        return;
+        setLocalStream(new MediaStream(stream.getTracks()));
+        return true;
       }
 
       const mediaDevices = navigator?.mediaDevices;
       if (!mediaDevices || typeof mediaDevices.getUserMedia !== "function") {
         console.warn("[meetrr] cannot enable camera: getUserMedia unavailable");
-        return;
+        return false;
       }
 
       try {
@@ -523,8 +535,10 @@ export function useWebRTC() {
         if (videoSenderRef.current) {
           await videoSenderRef.current.replaceTrack(newVideoTrack);
         }
+        return true;
       } catch (err) {
         console.warn("[meetrr] enabling camera failed:", err);
+        return false;
       }
     },
     [getLocalStream]

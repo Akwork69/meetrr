@@ -37,8 +37,8 @@ const ChatRoom = () => {
 
   const toggleCamera = async () => {
     const next = !cameraOn;
-    await setCameraEnabled(next);
-    setCameraOn(next);
+    const applied = await setCameraEnabled(next);
+    if (applied) setCameraOn(next);
   };
 
   const toggleMic = () => {
