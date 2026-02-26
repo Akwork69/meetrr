@@ -23,6 +23,7 @@ const ChatRoom = () => {
   const [cameraOn, setCameraOn] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const startedRef = useRef(false);
+  const reconnectingRef = useRef(false);
 
   useEffect(() => {
     if (startedRef.current) return;
@@ -34,6 +35,19 @@ const ChatRoom = () => {
     const hasEnabledVideo = Boolean(localStream?.getVideoTracks().some((t) => t.enabled));
     setCameraOn(hasEnabledVideo);
   }, [localStream]);
+
+  useEffect(() => {
+    if (status !== "disconnected" || reconnectingRef.current) return;
+    reconnectingRef.current = true;
+
+    const timer = setTimeout(() => {
+      void startSearching().finally(() => {
+        reconnectingRef.current = false;
+      });
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [status, startSearching]);
 
   const toggleCamera = async () => {
     const next = !cameraOn;
