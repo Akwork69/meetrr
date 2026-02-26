@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { SkipForward, PhoneOff, Zap, Video, VideoOff, Mic, MicOff } from "lucide-react";
 import VideoPanel from "@/components/VideoPanel";
 import ChatPanel from "@/components/ChatPanel";
@@ -59,12 +59,12 @@ const ChatRoom = () => {
   return (
     <div className="h-screen flex flex-col bg-background">
       <header className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <a href="/" className="flex items-center gap-2">
+        <Link to="/" className="flex items-center gap-2">
           <Zap className="w-5 h-5 text-primary" />
           <span className="font-display font-bold text-foreground text-lg">
             meet<span className="text-primary">rr</span>
           </span>
-        </a>
+        </Link>
 
         <div className="flex items-center gap-2">
           <span
