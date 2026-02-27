@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { CSSProperties, useEffect, useState, useRef } from "react";
 import { VideoOff } from "lucide-react";
 
 interface VideoPanelProps {
@@ -9,6 +9,12 @@ interface VideoPanelProps {
 
 const VideoPanel = ({ stream, label, muted = false }: VideoPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const getViewportAspectRatio = () => {
+    const width = window.innerWidth || 16;
+    const height = window.innerHeight || 9;
+    return width / height;
+  };
+  const [panelAspectRatio, setPanelAspectRatio] = useState<number>(getViewportAspectRatio);
 
   useEffect(() => {
     if (!videoRef.current || !stream) return;
@@ -35,16 +41,35 @@ const VideoPanel = ({ stream, label, muted = false }: VideoPanelProps) => {
     }
   }, [stream]);
 
+  useEffect(() => {
+    const updateAspectRatio = () => {
+      setPanelAspectRatio(getViewportAspectRatio());
+    };
+
+    window.addEventListener("resize", updateAspectRatio);
+    window.addEventListener("orientationchange", updateAspectRatio);
+    return () => {
+      window.removeEventListener("resize", updateAspectRatio);
+      window.removeEventListener("orientationchange", updateAspectRatio);
+    };
+  }, []);
+
+  const frameStyle: CSSProperties = { aspectRatio: String(panelAspectRatio) };
+
   return (
     <div className="relative flex-1 min-h-0 bg-card rounded-lg overflow-hidden border border-border">
         {stream ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted={muted}
-            className="w-full h-full object-cover bg-black"
-          />
+          <div className="w-full h-full flex items-center justify-center bg-black">
+            <div className="h-full max-w-full" style={frameStyle}>
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted={muted}
+                className="w-full h-full object-contain bg-black"
+              />
+            </div>
+          </div>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3">
             <VideoOff className="w-12 h-12 text-muted-foreground" />
