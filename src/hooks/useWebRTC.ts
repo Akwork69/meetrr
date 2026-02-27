@@ -412,11 +412,16 @@ export function useWebRTC() {
       return;
     }
     searchInProgressRef.current = true;
+    setStatus("searching");
 
-    await cleanup();
+    try {
+      await cleanup();
+    } catch (err) {
+      // Do not block a new search if cleanup hits transient network issues.
+      console.warn("[meetrr] cleanup before search failed, continuing:", err);
+    }
     cleanedUpRef.current = false;
     myIdRef.current = generateClientId();
-    setStatus("searching");
 
     const stream = await getLocalStream();
     const myId = myIdRef.current;
