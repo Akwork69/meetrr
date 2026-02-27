@@ -43,7 +43,7 @@ const VideoPanel = ({ stream, label, muted = false }: VideoPanelProps) => {
           autoPlay
           playsInline
           muted={muted}
-          className="w-full h-full object-cover"
+          className="w-full h-full object-contain bg-black"
         />
       ) : (
         <div className="w-full h-full flex flex-col items-center justify-center gap-3">
