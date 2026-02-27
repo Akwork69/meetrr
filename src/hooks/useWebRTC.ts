@@ -73,6 +73,7 @@ export function useWebRTC() {
   const roomRef = useRef<string | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const videoSenderRef = useRef<RTCRtpSender | null>(null);
+  const videoTransceiverRef = useRef<RTCRtpTransceiver | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cleanedUpRef = useRef(false);
   const searchInProgressRef = useRef(false);
@@ -189,14 +190,43 @@ export function useWebRTC() {
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       pcRef.current = pc;
 
+      const configureVideoTransceiver = (transceiver: RTCRtpTransceiver | null) => {
+        if (!transceiver) return;
+        videoTransceiverRef.current = transceiver;
+
+        // Prefer H264 for broader cross-device compatibility (notably mobile Safari).
+        const getCaps = RTCRtpSender?.getCapabilities;
+        if (typeof getCaps !== "function" || typeof transceiver.setCodecPreferences !== "function") {
+          return;
+        }
+
+        const capabilities = getCaps("video");
+        const codecs = capabilities?.codecs ?? [];
+        if (!codecs.length) return;
+
+        const h264 = codecs.filter(
+          (codec) => codec.mimeType.toLowerCase() === "video/h264" && !/rtx|red|ulpfec/i.test(codec.mimeType)
+        );
+        if (!h264.length) return;
+
+        const others = codecs.filter((codec) => codec.mimeType.toLowerCase() !== "video/h264");
+        transceiver.setCodecPreferences([...h264, ...others]);
+      };
+
       const initialVideoTrack = stream.getVideoTracks()[0];
       if (initialVideoTrack) {
         // Use addTrack for initial camera publish for better mobile browser interop.
         videoSenderRef.current = pc.addTrack(initialVideoTrack, stream);
+        const videoTransceiver =
+          pc.getTransceivers().find((t) => t.sender === videoSenderRef.current) ??
+          pc.getTransceivers().find((t) => t.sender.track?.kind === "video" || t.receiver.track?.kind === "video") ??
+          null;
+        configureVideoTransceiver(videoTransceiver);
       } else {
         // Reserve a negotiated video sender when camera is unavailable initially.
         const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
         videoSenderRef.current = videoTransceiver.sender;
+        configureVideoTransceiver(videoTransceiver);
       }
 
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
