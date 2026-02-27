@@ -8,29 +8,27 @@ const Index = () => {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  useEffect(() => {
-    return () => {
-      stream?.getTracks().forEach((t) => t.stop());
-    };
-  }, [stream]);
+  const ensureCameraOn = async () => {
+    if (stream && stream.getVideoTracks().some((t) => t.readyState === "live")) {
+      setCameraOn(true);
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      return;
+    }
 
-  const toggleCamera = async () => {
-    if (cameraOn && stream) {
-      stream.getTracks().forEach((t) => t.stop());
-      setStream(null);
-      if (videoRef.current) videoRef.current.srcObject = null;
+    try {
+      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setStream(s);
+      if (videoRef.current) videoRef.current.srcObject = s;
+      setCameraOn(true);
+    } catch (e) {
+      console.error("Camera access denied:", e);
       setCameraOn(false);
-    } else {
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        setStream(s);
-        if (videoRef.current) videoRef.current.srcObject = s;
-        setCameraOn(true);
-      } catch (e) {
-        console.error("Camera access denied:", e);
-      }
     }
   };
+
+  useEffect(() => {
+    void ensureCameraOn();
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background relative overflow-hidden">
@@ -70,15 +68,16 @@ const Index = () => {
         {/* Controls */}
         <div className="flex gap-3">
           <button
-            onClick={toggleCamera}
+            onClick={ensureCameraOn}
             className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-display transition-opacity ${
               cameraOn
                 ? "bg-primary text-primary-foreground"
                 : "bg-secondary text-secondary-foreground"
             }`}
+            disabled={cameraOn}
           >
             {cameraOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
-            {cameraOn ? "Camera On" : "Camera Off"}
+            {cameraOn ? "Camera On (Required)" : "Enable Camera"}
           </button>
         </div>
 
