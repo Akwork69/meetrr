@@ -96,8 +96,10 @@ export function useWebRTC() {
   const videoSenderRef = useRef<RTCRtpSender | null>(null);
   const videoTransceiverRef = useRef<RTCRtpTransceiver | null>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const signalPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cleanedUpRef = useRef(false);
   const searchInProgressRef = useRef(false);
+  const matchAttemptInFlightRef = useRef(false);
   const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const enforceAudioConstraints = useCallback(async (stream: MediaStream) => {
@@ -125,6 +127,10 @@ export function useWebRTC() {
     if (pollingRef.current) {
       clearInterval(pollingRef.current);
       pollingRef.current = null;
+    }
+    if (signalPollingRef.current) {
+      clearInterval(signalPollingRef.current);
+      signalPollingRef.current = null;
     }
 
     if (realtimeChannelRef.current) {
@@ -197,7 +203,7 @@ export function useWebRTC() {
   // --- Create Peer Connection ---
   const createPeerConnection = useCallback(
     (stream: MediaStream, roomId: string, isOfferer: boolean) => {
-      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS, iceCandidatePoolSize: 4 });
       pcRef.current = pc;
 
       const configureVideoTransceiver = (transceiver: RTCRtpTransceiver | null) => {
@@ -267,6 +273,10 @@ export function useWebRTC() {
         console.log("[meetrr] ICE state:", pc.iceConnectionState);
         if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
           setStatus("connected");
+          if (signalPollingRef.current) {
+            clearInterval(signalPollingRef.current);
+            signalPollingRef.current = null;
+          }
         }
         if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed") {
           setStatus("disconnected");
@@ -373,9 +383,15 @@ export function useWebRTC() {
       realtimeChannelRef.current = channel;
 
       // Poll DB for signals as a reliable fallback (realtime may miss events)
-      const signalPoll = setInterval(async () => {
+      if (signalPollingRef.current) {
+        clearInterval(signalPollingRef.current);
+      }
+      signalPollingRef.current = setInterval(async () => {
         if (cleanedUpRef.current || pc.connectionState === "connected") {
-          clearInterval(signalPoll);
+          if (signalPollingRef.current) {
+            clearInterval(signalPollingRef.current);
+            signalPollingRef.current = null;
+          }
           return;
         }
         
@@ -396,7 +412,7 @@ export function useWebRTC() {
             }
           }
         }
-      }, 2000);
+      }, 1000);
 
       // Remove self from waiting queue once we move to a room.
       await supabase.from("waiting_users").delete().eq("user_id", myIdRef.current);
@@ -498,50 +514,56 @@ export function useWebRTC() {
     };
 
     const tryMatch = async () => {
-      if (cleanedUpRef.current) return;
-      if (await checkInvite()) return;
+      if (matchAttemptInFlightRef.current) return;
+      matchAttemptInFlightRef.current = true;
+      try {
+        if (cleanedUpRef.current) return;
+        if (await checkInvite()) return;
 
-      const { data, error } = await supabase
-        .from("waiting_users")
-        .select("user_id")
-        .neq("user_id", myId)
-        // Prefer newest waiters to avoid repeatedly selecting abandoned stale rows.
-        .order("created_at", { ascending: false })
-        .limit(1);
+        const { data, error } = await supabase
+          .from("waiting_users")
+          .select("user_id")
+          .neq("user_id", myId)
+          // Prefer newest waiters to avoid repeatedly selecting abandoned stale rows.
+          .order("created_at", { ascending: false })
+          .limit(1);
 
-      if (error) {
-        console.warn("[meetrr] poll error:", error);
-        return;
-      }
-
-      console.log("[meetrr] poll: found", data?.length ?? 0, "others");
-
-      if (data && data.length > 0) {
-        const partnerId = data[0].user_id;
-        if (partnerId === myId) {
+        if (error) {
+          console.warn("[meetrr] poll error:", error);
           return;
         }
-        console.log("[meetrr] matched:", partnerId);
 
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
+        console.log("[meetrr] poll: found", data?.length ?? 0, "others");
+
+        if (data && data.length > 0) {
+          const partnerId = data[0].user_id;
+          if (partnerId === myId) {
+            return;
+          }
+          console.log("[meetrr] matched:", partnerId);
+
+          if (pollingRef.current) {
+            clearInterval(pollingRef.current);
+            pollingRef.current = null;
+          }
+
+          // Nudge partner to connect immediately (faster than waiting for next poll).
+          await sendSignal(`invite-${partnerId}`, "invite", { partner_id: myId });
+
+          const iAmOfferer = myId > partnerId;
+          // Best-effort queue cleanup once we decide on a partner.
+          await supabase.from("waiting_users").delete().eq("user_id", partnerId);
+          await connectToPeer(stream, partnerId, iAmOfferer);
+          searchInProgressRef.current = false;
         }
-
-        // Nudge partner to connect immediately (faster than waiting for next poll).
-        await sendSignal(`invite-${partnerId}`, "invite", { partner_id: myId });
-
-        const iAmOfferer = myId > partnerId;
-        // Best-effort queue cleanup once we decide on a partner.
-        await supabase.from("waiting_users").delete().eq("user_id", partnerId);
-        await connectToPeer(stream, partnerId, iAmOfferer);
-        searchInProgressRef.current = false;
+      } finally {
+        matchAttemptInFlightRef.current = false;
       }
     };
 
     // Listen for direct invites while searching.
-    const inviteChannel = supabase
-      .channel(`invite-${myId}`)
+    const searchChannel = supabase
+      .channel(`search-${myId}`)
       .on(
         "postgres_changes",
         {
@@ -566,14 +588,28 @@ export function useWebRTC() {
           searchInProgressRef.current = false;
         }
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "waiting_users",
+        },
+        async (payload) => {
+          if (roomRef.current || cleanedUpRef.current) return;
+          const row = payload.new as { user_id?: string };
+          if (!row?.user_id || row.user_id === myId) return;
+          await tryMatch();
+        }
+      )
       .subscribe();
 
-    realtimeChannelRef.current = inviteChannel;
+    realtimeChannelRef.current = searchChannel;
 
     await checkInvite();
     await tryMatch();
     if (!roomRef.current && !cleanedUpRef.current) {
-      pollingRef.current = setInterval(tryMatch, 1000);
+      pollingRef.current = setInterval(tryMatch, 1500);
     }
   }, [cleanup, getLocalStream, connectToPeer, sendSignal]);
 
@@ -603,6 +639,7 @@ export function useWebRTC() {
       searchInProgressRef.current = false;
       pcRef.current?.close();
       if (pollingRef.current) clearInterval(pollingRef.current);
+      if (signalPollingRef.current) clearInterval(signalPollingRef.current);
       if (realtimeChannelRef.current) supabase.removeChannel(realtimeChannelRef.current);
     };
   }, []);
