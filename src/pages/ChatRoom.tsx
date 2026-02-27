@@ -16,7 +16,6 @@ const ChatRoom = () => {
     sendMessage,
     disconnect,
     skip,
-    getLocalStream,
     setCameraEnabled,
   } = useWebRTC();
 
@@ -28,8 +27,8 @@ const ChatRoom = () => {
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    getLocalStream().then(() => startSearching());
-  }, [getLocalStream, startSearching]);
+    void startSearching();
+  }, [startSearching]);
 
   useEffect(() => {
     const hasEnabledVideo = Boolean(localStream?.getVideoTracks().some((t) => t.enabled));
