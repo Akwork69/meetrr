@@ -57,7 +57,7 @@ const VideoPanel = ({ stream, label, muted = false }: VideoPanelProps) => {
   const frameStyle: CSSProperties = { aspectRatio: String(panelAspectRatio) };
 
   return (
-    <div className="relative flex-1 min-h-0 bg-card rounded-lg overflow-hidden border border-border">
+    <div className="relative w-full h-full min-h-0 bg-card rounded-lg overflow-hidden border border-border">
         {stream ? (
           <div className="w-full h-full flex items-center justify-center bg-black">
             <div className="h-full max-w-full" style={frameStyle}>
