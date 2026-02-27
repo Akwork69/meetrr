@@ -132,15 +132,15 @@ const ChatRoom = () => {
       </header>
 
       <div className="flex-1 min-h-0 p-3">
-        <div className="h-full min-h-0 flex flex-col md:flex-row gap-3">
-          <div className="flex-1 min-h-0 flex flex-col gap-3">
+        <div className="h-full min-h-0 flex flex-col md:flex-row gap-3 overflow-y-auto md:overflow-hidden">
+          <div className="h-[56vh] sm:h-[58vh] md:h-auto md:flex-1 min-h-0 flex flex-col gap-3">
             <VideoPanel stream={remoteStream} label="Stranger" />
             <div className="h-40 sm:h-48 md:h-auto md:flex-1 min-h-0">
               <VideoPanel stream={localStream} label="You" muted />
             </div>
           </div>
 
-          <div className="h-56 sm:h-64 md:h-auto md:w-80 shrink-0">
+          <div className="h-[30vh] min-h-[220px] sm:min-h-[240px] md:h-auto md:w-80 shrink-0">
             <ChatPanel
               messages={messages}
               onSend={sendMessage}
