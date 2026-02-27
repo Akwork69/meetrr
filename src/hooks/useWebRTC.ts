@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { isSupabaseConfigured, supabase } from "@/integrations/supabase/client";
 
 const ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -39,7 +39,14 @@ const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   noiseSuppression: true,
 };
 
-type ConnectionStatus = "idle" | "searching" | "connecting" | "connected" | "disconnected" | "camera_required";
+type ConnectionStatus =
+  | "idle"
+  | "searching"
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "camera_required"
+  | "config_required";
 type SignalType = "offer" | "answer" | "ice-candidate" | "invite";
 
 interface SignalPayload {
@@ -412,6 +419,10 @@ export function useWebRTC() {
   // --- Start searching ---
   const startSearching = useCallback(async () => {
     if (searchInProgressRef.current) {
+      return;
+    }
+    if (!isSupabaseConfigured) {
+      setStatus("config_required");
       return;
     }
     searchInProgressRef.current = true;

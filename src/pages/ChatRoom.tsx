@@ -60,6 +60,7 @@ const ChatRoom = () => {
     connected: "Connected to a stranger!",
     disconnected: "Stranger disconnected",
     camera_required: "Camera permission required",
+    config_required: "App setup incomplete. Missing Supabase config.",
   };
 
   return (
