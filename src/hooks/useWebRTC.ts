@@ -188,13 +188,14 @@ export function useWebRTC() {
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
       pcRef.current = pc;
 
-      // Reserve a negotiated video sender even when camera is unavailable initially.
-      const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
-      videoSenderRef.current = videoTransceiver.sender;
-
       const initialVideoTrack = stream.getVideoTracks()[0];
       if (initialVideoTrack) {
-        void videoSenderRef.current.replaceTrack(initialVideoTrack);
+        // Use addTrack for initial camera publish for better mobile browser interop.
+        videoSenderRef.current = pc.addTrack(initialVideoTrack, stream);
+      } else {
+        // Reserve a negotiated video sender when camera is unavailable initially.
+        const videoTransceiver = pc.addTransceiver("video", { direction: "sendrecv" });
+        videoSenderRef.current = videoTransceiver.sender;
       }
 
       stream.getAudioTracks().forEach((track) => pc.addTrack(track, stream));
