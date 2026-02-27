@@ -76,24 +76,26 @@ const ChatRoom = () => {
 
   return (
     <div className="h-screen flex flex-col bg-background">
-      <header className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <button onClick={() => navigate("/")} className="flex items-center gap-2" type="button">
-          <Zap className="w-5 h-5 text-primary" />
-          <span className="font-display font-bold text-foreground text-lg">
-            meet<span className="text-primary">rr</span>
-          </span>
-        </button>
+      <header className="px-3 py-3 border-b border-border">
+        <div className="flex items-center justify-between gap-3">
+          <button onClick={() => navigate("/")} className="flex items-center gap-2" type="button">
+            <Zap className="w-5 h-5 text-primary" />
+            <span className="font-display font-bold text-foreground text-lg">
+              meet<span className="text-primary">rr</span>
+            </span>
+          </button>
 
-        <div className="flex items-center gap-2">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              status === "connected" ? "bg-primary" : status === "searching" ? "bg-yellow-500 animate-pulse" : "bg-muted-foreground"
-            }`}
-          />
-          <span className="text-sm text-muted-foreground font-body">{statusText[status]}</span>
+          <div className="flex items-center gap-2">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                status === "connected" ? "bg-primary" : status === "searching" ? "bg-yellow-500 animate-pulse" : "bg-muted-foreground"
+              }`}
+            />
+            <span className="text-sm text-muted-foreground font-body">{statusText[status]}</span>
+          </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="mt-3 flex flex-wrap gap-2">
           <button
             onClick={toggleCamera}
             className={`p-2 rounded-lg text-sm transition-opacity ${
@@ -114,33 +116,37 @@ const ChatRoom = () => {
           </button>
           <button
             onClick={skip}
-            className="flex items-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-display hover:opacity-80 transition-opacity"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-secondary text-secondary-foreground px-4 py-2 rounded-lg text-sm font-display hover:opacity-80 transition-opacity"
           >
             <SkipForward className="w-4 h-4" />
-            Next
+            <span>Next</span>
           </button>
           <button
             onClick={handleDisconnect}
-            className="flex items-center gap-1.5 bg-destructive text-destructive-foreground px-4 py-2 rounded-lg text-sm font-display hover:opacity-80 transition-opacity"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 bg-destructive text-destructive-foreground px-4 py-2 rounded-lg text-sm font-display hover:opacity-80 transition-opacity"
           >
             <PhoneOff className="w-4 h-4" />
-            Stop
+            <span>Stop</span>
           </button>
         </div>
       </header>
 
-      <div className="flex-1 flex min-h-0 p-3 gap-3">
-        <div className="flex-1 flex flex-col gap-3 min-h-0">
-          <VideoPanel stream={remoteStream} label="Stranger" />
-          <VideoPanel stream={localStream} label="You" muted />
-        </div>
+      <div className="flex-1 min-h-0 p-3">
+        <div className="h-full min-h-0 flex flex-col md:flex-row gap-3">
+          <div className="flex-1 min-h-0 flex flex-col gap-3">
+            <VideoPanel stream={remoteStream} label="Stranger" />
+            <div className="h-40 sm:h-48 md:h-auto md:flex-1 min-h-0">
+              <VideoPanel stream={localStream} label="You" muted />
+            </div>
+          </div>
 
-        <div className="w-80 hidden md:flex">
-          <ChatPanel
-            messages={messages}
-            onSend={sendMessage}
-            disabled={status !== "connected"}
-          />
+          <div className="h-56 sm:h-64 md:h-auto md:w-80 shrink-0">
+            <ChatPanel
+              messages={messages}
+              onSend={sendMessage}
+              disabled={status !== "connected"}
+            />
+          </div>
         </div>
       </div>
     </div>
