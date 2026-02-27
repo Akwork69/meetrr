@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Video, VideoOff, Zap } from "lucide-react";
 
 const Index = () => {
+  const navigate = useNavigate();
   const [cameraOn, setCameraOn] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -81,13 +82,19 @@ const Index = () => {
           </button>
         </div>
 
-        <Link
-          to="/chat"
-          className="inline-flex items-center gap-2 bg-primary text-primary-foreground font-display font-bold text-lg px-8 py-4 rounded-lg hover:opacity-90 transition-all animate-pulse-glow"
+        <button
+          type="button"
+          disabled={!cameraOn}
+          onClick={() => cameraOn && navigate("/chat")}
+          className={`inline-flex items-center gap-2 font-display font-bold text-lg px-8 py-4 rounded-lg transition-all ${
+            cameraOn
+              ? "bg-primary text-primary-foreground hover:opacity-90 animate-pulse-glow"
+              : "bg-muted text-muted-foreground cursor-not-allowed opacity-70"
+          }`}
         >
           <Video className="w-5 h-5" />
-          Start Chatting
-        </Link>
+          {cameraOn ? "Start Chatting" : "Enable Camera to Start"}
+        </button>
 
         <p className="text-muted-foreground text-xs font-body">
           By using meetrr, you accept our community guidelines.
