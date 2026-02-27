@@ -130,9 +130,14 @@ const ChatRoom = () => {
       </header>
 
       <div className="flex-1 flex min-h-0 p-3 gap-3">
-        <div className="flex-1 flex flex-col gap-3 min-h-0">
+        <div className="flex-1 min-h-0 relative">
           <VideoPanel stream={remoteStream} label="Stranger" />
-          <VideoPanel stream={localStream} label="You" muted />
+          <VideoPanel
+            stream={localStream}
+            label="You"
+            muted
+            className="absolute bottom-3 right-3 z-20 w-32 h-24 md:w-48 md:h-36 shadow-lg"
+          />
         </div>
 
         <div className="w-80 hidden md:flex">
