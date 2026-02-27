@@ -5,30 +5,93 @@ import { Video, VideoOff, Zap } from "lucide-react";
 const Index = () => {
   const navigate = useNavigate();
   const [cameraOn, setCameraOn] = useState(false);
+  const [warning, setWarning] = useState("");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const ensureCameraOn = async () => {
+  useEffect(() => {
+    return () => {
+      stream?.getTracks().forEach((t) => t.stop());
+    };
+  }, [stream]);
+
+  const ensureCameraOn = async (): Promise<MediaStream | null> => {
     if (stream && stream.getVideoTracks().some((t) => t.readyState === "live")) {
       setCameraOn(true);
       if (videoRef.current) videoRef.current.srcObject = stream;
-      return;
+      return stream;
+    }
+
+    const mediaDevices = navigator?.mediaDevices;
+    if (!mediaDevices || typeof mediaDevices.getUserMedia !== "function") {
+      setCameraOn(false);
+      return null;
     }
 
     try {
-      const s = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      const s = await mediaDevices.getUserMedia({ video: true, audio: true });
       setStream(s);
-      if (videoRef.current) videoRef.current.srcObject = s;
+      const video = videoRef.current;
+      if (video) {
+        video.srcObject = s;
+        await video.play().catch(() => undefined);
+      }
       setCameraOn(true);
+      return s;
     } catch (e) {
       console.error("Camera access denied:", e);
       setCameraOn(false);
+      return null;
     }
   };
 
   useEffect(() => {
     void ensureCameraOn();
   }, []);
+
+  const hasVisibleCameraPreview = async (activeStream: MediaStream): Promise<boolean> => {
+    const track = activeStream.getVideoTracks()[0];
+    if (!track || track.readyState !== "live") {
+      return false;
+    }
+
+    const video = videoRef.current;
+    if (!video) {
+      return false;
+    }
+
+    if (video.videoWidth > 0 && video.videoHeight > 0) {
+      return true;
+    }
+
+    return await new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => resolve(false), 1500);
+      const onLoadedData = () => {
+        clearTimeout(timeout);
+        resolve(video.videoWidth > 0 && video.videoHeight > 0);
+      };
+      video.addEventListener("loadeddata", onLoadedData, { once: true });
+    });
+  };
+
+  const handleStartChatting = async () => {
+    setWarning("");
+    const activeStream = await ensureCameraOn();
+    if (!activeStream) {
+      setWarning("Camera permission is required to start chatting.");
+      return;
+    }
+
+    const visible = await hasVisibleCameraPreview(activeStream);
+    if (!visible) {
+      setCameraOn(false);
+      setWarning("Camera feed is not visible. Please allow camera access and try again.");
+      return;
+    }
+
+    setCameraOn(true);
+    navigate("/chat");
+  };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-background relative overflow-hidden">
@@ -65,35 +128,23 @@ const Index = () => {
           )}
         </div>
 
-        {/* Controls */}
-        <div className="flex gap-3">
-          <button
-            onClick={ensureCameraOn}
-            className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-display transition-opacity ${
-              cameraOn
-                ? "bg-primary text-primary-foreground"
-                : "bg-secondary text-secondary-foreground"
-            }`}
-            disabled={cameraOn}
-          >
-            {cameraOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
-            {cameraOn ? "Camera On (Required)" : "Enable Camera"}
-          </button>
-        </div>
-
         <button
           type="button"
-          disabled={!cameraOn}
-          onClick={() => cameraOn && navigate("/chat")}
+          onClick={handleStartChatting}
           className={`inline-flex items-center gap-2 font-display font-bold text-lg px-8 py-4 rounded-lg transition-all ${
             cameraOn
               ? "bg-primary text-primary-foreground hover:opacity-90 animate-pulse-glow"
-              : "bg-muted text-muted-foreground cursor-not-allowed opacity-70"
+              : "bg-secondary text-secondary-foreground hover:opacity-90"
           }`}
         >
           <Video className="w-5 h-5" />
-          {cameraOn ? "Start Chatting" : "Enable Camera to Start"}
+          Start Chatting
         </button>
+        {warning && (
+          <p className="text-destructive text-sm font-body text-center max-w-md">
+            {warning}
+          </p>
+        )}
 
         <p className="text-muted-foreground text-xs font-body">
           By using meetrr, you accept our community guidelines.
