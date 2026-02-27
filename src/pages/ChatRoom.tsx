@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { SkipForward, PhoneOff, Zap, Video, VideoOff, Mic, MicOff } from "lucide-react";
+import { SkipForward, PhoneOff, Zap, Mic, MicOff } from "lucide-react";
 import VideoPanel from "@/components/VideoPanel";
 import ChatPanel from "@/components/ChatPanel";
 import { useWebRTC } from "@/hooks/useWebRTC";
@@ -16,10 +16,8 @@ const ChatRoom = () => {
     sendMessage,
     disconnect,
     skip,
-    setCameraEnabled,
   } = useWebRTC();
 
-  const [cameraOn, setCameraOn] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const startedRef = useRef(false);
   const reconnectingRef = useRef(false);
@@ -29,11 +27,6 @@ const ChatRoom = () => {
     startedRef.current = true;
     void startSearching();
   }, [startSearching]);
-
-  useEffect(() => {
-    const hasEnabledVideo = Boolean(localStream?.getVideoTracks().some((t) => t.enabled));
-    setCameraOn(hasEnabledVideo);
-  }, [localStream]);
 
   useEffect(() => {
     if (status !== "disconnected" || reconnectingRef.current) return;
@@ -47,12 +40,6 @@ const ChatRoom = () => {
 
     return () => clearTimeout(timer);
   }, [status, startSearching]);
-
-  const toggleCamera = async () => {
-    const next = !cameraOn;
-    const applied = await setCameraEnabled(next);
-    if (applied) setCameraOn(next);
-  };
 
   const toggleMic = () => {
     if (localStream) {
@@ -72,6 +59,7 @@ const ChatRoom = () => {
     connecting: "Connecting...",
     connected: "Connected to a stranger!",
     disconnected: "Stranger disconnected",
+    camera_required: "Camera permission required",
   };
 
   return (
@@ -96,15 +84,6 @@ const ChatRoom = () => {
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            onClick={toggleCamera}
-            className={`p-2 rounded-lg text-sm transition-opacity ${
-              cameraOn ? "bg-secondary text-secondary-foreground" : "bg-destructive text-destructive-foreground"
-            }`}
-            title={cameraOn ? "Turn camera off" : "Turn camera on"}
-          >
-            {cameraOn ? <Video className="w-4 h-4" /> : <VideoOff className="w-4 h-4" />}
-          </button>
           <button
             onClick={toggleMic}
             className={`p-2 rounded-lg text-sm transition-opacity ${

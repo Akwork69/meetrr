@@ -20,7 +20,7 @@ const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   noiseSuppression: true,
 };
 
-type ConnectionStatus = "idle" | "searching" | "connecting" | "connected" | "disconnected";
+type ConnectionStatus = "idle" | "searching" | "connecting" | "connected" | "disconnected" | "camera_required";
 type SignalType = "offer" | "answer" | "ice-candidate" | "invite";
 
 interface SignalPayload {
@@ -126,34 +126,23 @@ export function useWebRTC() {
 
     const mediaDevices = navigator?.mediaDevices;
     if (!mediaDevices || typeof mediaDevices.getUserMedia !== "function") {
-      console.warn("[meetrr] mediaDevices.getUserMedia not available; using empty stream");
-      const stream = new MediaStream();
-      localStreamRef.current = stream;
-      setLocalStream(stream);
-      return stream;
+      throw new Error("camera_required");
     }
 
     try {
       const stream = await mediaDevices.getUserMedia({ video: true, audio: true });
+      const cameraTrack = stream.getVideoTracks()[0];
+      if (!cameraTrack) {
+        throw new Error("camera_required");
+      }
+      cameraTrack.enabled = true;
       await enforceAudioConstraints(stream);
       localStreamRef.current = stream;
       setLocalStream(stream);
       return stream;
     } catch (err) {
-      console.warn("[meetrr] getUserMedia failed, trying audio only:", err);
-      try {
-        const stream = await mediaDevices.getUserMedia({ video: false, audio: true });
-        await enforceAudioConstraints(stream);
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        return stream;
-      } catch (err2) {
-        console.warn("[meetrr] audio-only also failed, creating empty stream:", err2);
-        const stream = new MediaStream();
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        return stream;
-      }
+      console.warn("[meetrr] camera access required for chat:", err);
+      throw new Error("camera_required");
     }
   }, [enforceAudioConstraints]);
 
@@ -418,7 +407,15 @@ export function useWebRTC() {
     cleanedUpRef.current = false;
     myIdRef.current = generateClientId();
 
-    const stream = await getLocalStream();
+    let stream: MediaStream;
+    try {
+      stream = await getLocalStream();
+    } catch (err) {
+      console.warn("[meetrr] startSearching blocked: camera required", err);
+      searchInProgressRef.current = false;
+      setStatus("camera_required");
+      return;
+    }
     const myId = myIdRef.current;
 
     console.log("[meetrr] searching as:", myId);
@@ -550,50 +547,6 @@ export function useWebRTC() {
     }
   }, [cleanup, getLocalStream, connectToPeer, sendSignal]);
 
-  const setCameraEnabled = useCallback(
-    async (enabled: boolean): Promise<boolean> => {
-      const stream = localStreamRef.current ?? (await getLocalStream());
-      const existingVideoTrack = stream.getVideoTracks()[0];
-
-      if (!enabled) {
-        if (existingVideoTrack) existingVideoTrack.enabled = false;
-        setLocalStream(new MediaStream(stream.getTracks()));
-        return true;
-      }
-
-      if (existingVideoTrack) {
-        existingVideoTrack.enabled = true;
-        setLocalStream(new MediaStream(stream.getTracks()));
-        return true;
-      }
-
-      const mediaDevices = navigator?.mediaDevices;
-      if (!mediaDevices || typeof mediaDevices.getUserMedia !== "function") {
-        console.warn("[meetrr] cannot enable camera: getUserMedia unavailable");
-        return false;
-      }
-
-      try {
-        const cameraStream = await mediaDevices.getUserMedia({ video: true, audio: false });
-        const newVideoTrack = cameraStream.getVideoTracks()[0];
-        if (!newVideoTrack) return;
-
-        stream.addTrack(newVideoTrack);
-        localStreamRef.current = stream;
-        setLocalStream(new MediaStream(stream.getTracks()));
-
-        if (videoSenderRef.current) {
-          await videoSenderRef.current.replaceTrack(newVideoTrack);
-        }
-        return true;
-      } catch (err) {
-        console.warn("[meetrr] enabling camera failed:", err);
-        return false;
-      }
-    },
-    [getLocalStream]
-  );
-
   // --- Send chat message ---
   const sendMessage = useCallback((text: string) => {
     if (dataChannelRef.current?.readyState === "open") {
@@ -634,6 +587,5 @@ export function useWebRTC() {
     disconnect,
     skip,
     getLocalStream,
-    setCameraEnabled,
   };
 }
