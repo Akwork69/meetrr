@@ -31,6 +31,7 @@ interface SignalPayload {
 }
 
 interface DbSignal {
+  id: string;
   sender_id: string;
   type: SignalType;
   payload: SignalPayload;
@@ -259,6 +260,7 @@ export function useWebRTC() {
 
       const pc = createPeerConnection(stream, roomId, iAmOfferer);
       const pendingIce: RTCIceCandidateInit[] = [];
+      const processedSignalIds = new Set<string>();
 
       const addOrQueueIce = async (candidate?: RTCIceCandidateInit) => {
         if (!candidate) return;
@@ -276,6 +278,34 @@ export function useWebRTC() {
         }
       };
 
+      const handleSignal = async (signal: DbSignal) => {
+        if (!signal?.id) return;
+        if (signal.sender_id === myIdRef.current) return;
+        if (processedSignalIds.has(signal.id)) return;
+        processedSignalIds.add(signal.id);
+
+        console.log("[meetrr] received signal:", signal.type);
+
+        if (signal.type === "offer" && !iAmOfferer) {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
+          await flushPendingIce();
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await sendSignal(roomId, "answer", { sdp: answer });
+          return;
+        }
+
+        if (signal.type === "answer" && iAmOfferer) {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
+          await flushPendingIce();
+          return;
+        }
+
+        if (signal.type === "ice-candidate") {
+          await addOrQueueIce(signal.payload.candidate);
+        }
+      };
+
       // Listen for signals via Postgres realtime
       const channel = supabase
         .channel(`signals-${roomId}`)
@@ -289,23 +319,8 @@ export function useWebRTC() {
           },
           async (payload) => {
             const signal = payload.new as DbSignal;
-            if (signal.sender_id === myIdRef.current) return;
-
-            console.log("[meetrr] received signal:", signal.type);
-
             try {
-              if (signal.type === "offer" && !iAmOfferer) {
-                await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
-                await flushPendingIce();
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                await sendSignal(roomId, "answer", { sdp: answer });
-              } else if (signal.type === "answer" && iAmOfferer) {
-                await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
-                await flushPendingIce();
-              } else if (signal.type === "ice-candidate") {
-                await addOrQueueIce(signal.payload.candidate);
-              }
+              await handleSignal(signal);
             } catch (e) {
               console.error("[meetrr] signal handling error:", e);
             }
@@ -335,20 +350,7 @@ export function useWebRTC() {
           console.log("[meetrr] DB poll found", data.length, "signals");
           for (const signal of data as DbSignal[]) {
             try {
-              if (signal.type === "offer" && !iAmOfferer && !pc.remoteDescription) {
-                console.log("[meetrr] processing offer from DB poll");
-                await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
-                await flushPendingIce();
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-                await sendSignal(roomId, "answer", { sdp: answer });
-              } else if (signal.type === "answer" && iAmOfferer && !pc.remoteDescription) {
-                console.log("[meetrr] processing answer from DB poll");
-                await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
-                await flushPendingIce();
-              } else if (signal.type === "ice-candidate") {
-                await addOrQueueIce(signal.payload.candidate);
-              }
+              await handleSignal(signal);
             } catch (e) {
               console.warn("[meetrr] signal poll error:", e);
             }
