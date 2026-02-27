@@ -4,7 +4,8 @@ import path from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
-  base: mode === "production" ? "/meetrr/" : "/",
+  // Use relative assets so GitHub Pages works for both project pages and custom domains.
+  base: mode === "production" ? "./" : "/",
   server: {
     host: "::",
     port: 8080,
