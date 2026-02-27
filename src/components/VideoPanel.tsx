@@ -5,20 +5,16 @@ interface VideoPanelProps {
   stream: MediaStream | null;
   label: string;
   muted?: boolean;
-  className?: string;
 }
 
-const VideoPanel = ({ stream, label, muted = false, className = "" }: VideoPanelProps) => {
+const VideoPanel = ({ stream, label, muted = false }: VideoPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const bgVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (!videoRef.current || !stream) return;
 
     const video = videoRef.current;
-    const bgVideo = bgVideoRef.current;
     video.srcObject = stream;
-    if (bgVideo) bgVideo.srcObject = stream;
 
     const tryPlay = async () => {
       try {
@@ -36,32 +32,19 @@ const VideoPanel = ({ stream, label, muted = false, className = "" }: VideoPanel
       if (video.srcObject === stream) {
         video.srcObject = null;
       }
-      if (bgVideo && bgVideo.srcObject === stream) {
-        bgVideo.srcObject = null;
-      }
     }
   }, [stream]);
 
   return (
-    <div className={`relative flex-1 min-h-0 bg-card rounded-lg overflow-hidden border border-border ${className}`}>
+    <div className="relative flex-1 min-h-0 bg-card rounded-lg overflow-hidden border border-border">
         {stream ? (
-          <>
-            <video
-              ref={bgVideoRef}
-              autoPlay
-              playsInline
-              muted
-              aria-hidden
-              className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-40"
-            />
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted={muted}
-              className="relative z-10 w-full h-full object-contain bg-black/60"
-            />
-          </>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted={muted}
+            className="w-full h-full object-cover bg-black"
+          />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3">
             <VideoOff className="w-12 h-12 text-muted-foreground" />
