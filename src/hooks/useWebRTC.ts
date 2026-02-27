@@ -15,7 +15,6 @@ const ICE_SERVERS = [
     credential: "openrelayproject",
   },
 ];
-const WAITING_USER_TTL_MS = 60_000;
 const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
@@ -54,10 +53,6 @@ const generateClientId = (): string => {
   }
 
   return `client-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
-};
-
-const getWaitingUserCutoffIso = (): string => {
-  return new Date(Date.now() - WAITING_USER_TTL_MS).toISOString();
 };
 
 export function useWebRTC() {
@@ -428,9 +423,6 @@ export function useWebRTC() {
 
     console.log("[meetrr] searching as:", myId);
 
-    // Remove abandoned queue entries from crashed/closed tabs.
-    await supabase.from("waiting_users").delete().lt("created_at", getWaitingUserCutoffIso());
-
     const { error: insertError } = await supabase.from("waiting_users").upsert({ user_id: myId });
     if (insertError) {
       console.error("[meetrr] insert error:", insertError);
@@ -471,6 +463,8 @@ export function useWebRTC() {
       }
 
       const iAmOfferer = myId > partnerId;
+      // Best-effort queue cleanup once a match is accepted.
+      await supabase.from("waiting_users").delete().eq("user_id", partnerId);
       await connectToPeer(stream, partnerId, iAmOfferer);
       searchInProgressRef.current = false;
       return true;
@@ -484,8 +478,8 @@ export function useWebRTC() {
         .from("waiting_users")
         .select("user_id")
         .neq("user_id", myId)
-        .gte("created_at", getWaitingUserCutoffIso())
-        .order("created_at", { ascending: true })
+        // Prefer newest waiters to avoid repeatedly selecting abandoned stale rows.
+        .order("created_at", { ascending: false })
         .limit(1);
 
       if (error) {
@@ -511,6 +505,8 @@ export function useWebRTC() {
         await sendSignal(`invite-${partnerId}`, "invite", { partner_id: myId });
 
         const iAmOfferer = myId > partnerId;
+        // Best-effort queue cleanup once we decide on a partner.
+        await supabase.from("waiting_users").delete().eq("user_id", partnerId);
         await connectToPeer(stream, partnerId, iAmOfferer);
         searchInProgressRef.current = false;
       }
