@@ -1,4 +1,4 @@
-import { CSSProperties, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { VideoOff } from "lucide-react";
 
 interface VideoPanelProps {
@@ -9,13 +9,15 @@ interface VideoPanelProps {
 
 const VideoPanel = ({ stream, label, muted = false }: VideoPanelProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [videoAspectRatio, setVideoAspectRatio] = useState<number>(16 / 9);
+  const bgVideoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     if (!videoRef.current || !stream) return;
 
     const video = videoRef.current;
+    const bgVideo = bgVideoRef.current;
     video.srcObject = stream;
+    if (bgVideo) bgVideo.srcObject = stream;
 
     const tryPlay = async () => {
       try {
@@ -29,39 +31,36 @@ const VideoPanel = ({ stream, label, muted = false }: VideoPanelProps) => {
 
     void tryPlay();
 
-    const handleLoadedMetadata = () => {
-      const ratio = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 0;
-      if (ratio > 0) setVideoAspectRatio(ratio);
-    };
-
-    video.addEventListener("loadedmetadata", handleLoadedMetadata);
-
     return () => {
-      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       if (video.srcObject === stream) {
         video.srcObject = null;
+      }
+      if (bgVideo && bgVideo.srcObject === stream) {
+        bgVideo.srcObject = null;
       }
     }
   }, [stream]);
 
-  const frameStyle: CSSProperties = {
-    aspectRatio: String(videoAspectRatio || 16 / 9),
-  };
-
   return (
-    <div className="relative flex-1 min-h-0 flex items-center justify-center">
-      <div
-        className="relative w-full max-h-full bg-card rounded-lg overflow-hidden border border-border"
-        style={frameStyle}
-      >
+    <div className="relative flex-1 min-h-0 bg-card rounded-lg overflow-hidden border border-border">
         {stream ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted={muted}
-            className="w-full h-full object-contain bg-black"
-          />
+          <>
+            <video
+              ref={bgVideoRef}
+              autoPlay
+              playsInline
+              muted
+              aria-hidden
+              className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-40"
+            />
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted={muted}
+              className="relative z-10 w-full h-full object-contain bg-black/60"
+            />
+          </>
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-3">
             <VideoOff className="w-12 h-12 text-muted-foreground" />
@@ -73,7 +72,6 @@ const VideoPanel = ({ stream, label, muted = false }: VideoPanelProps) => {
         <div className="absolute bottom-3 left-3 bg-background/80 backdrop-blur-sm px-3 py-1 rounded-md">
           <span className="text-xs font-display text-foreground">{label}</span>
         </div>
-      </div>
     </div>
   );
 };
